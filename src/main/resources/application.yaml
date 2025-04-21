@@ -32,4 +32,4 @@ canal:
   subscribe-filter: dynamic_bean.refresh_bean
 
 dynamic-bean:
-  mode: database-auto #database || redis || database-auto
+  mode: database #database || redis || database-auto

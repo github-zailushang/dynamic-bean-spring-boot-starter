@@ -1,6 +1,7 @@
 package shop.zailushang.spring.boot.pubsub.event;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import shop.zailushang.spring.boot.model.RefreshBeanModel;
 import shop.zailushang.spring.boot.framework.RefreshableScope;
@@ -10,6 +11,7 @@ import shop.zailushang.spring.boot.util.RefreshableBeanDefinitionResolver;
 import javax.script.ScriptEngine;
 import java.util.NoSuchElementException;
 
+@Slf4j
 @RequiredArgsConstructor
 public class DefaultEventProcessor implements EventProcessor {
     private final DefaultListableBeanFactory defaultListableBeanFactory;
@@ -38,6 +40,7 @@ public class DefaultEventProcessor implements EventProcessor {
         Assert.isTrue(beanDefinition, Assert::isNull, () -> new IllegalArgumentException("beanDefinition already exists"));
         var beanDefinitionHolder = RefreshableBeanDefinitionResolver.resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngine, refreshableScope);
         defaultListableBeanFactory.registerBeanDefinition(beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition());
+        log.info("add beanDefinition: {}", beanDefinitionHolder.getBeanName());
     }
 
     // 删除时，删除 Bean实例, 并删除 BeanDefinition。
@@ -47,5 +50,6 @@ public class DefaultEventProcessor implements EventProcessor {
         Assert.isTrue(beanDefinition, Assert::isNotNull, () -> new NoSuchElementException("beanDefinition not found"));
         refreshableScope.remove(refreshBeanModel.beanName());
         defaultListableBeanFactory.removeBeanDefinition(refreshBeanModel.beanName());
+        log.info("del beanDefinition: {}", beanName);
     }
 }
