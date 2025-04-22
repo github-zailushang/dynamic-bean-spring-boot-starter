@@ -2,6 +2,7 @@ package shop.zailushang.spring.boot.pubsub.event;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import shop.zailushang.spring.boot.model.RefreshBeanModel;
 import shop.zailushang.spring.boot.framework.RefreshableScope;
@@ -10,6 +11,7 @@ import shop.zailushang.spring.boot.util.RefreshableBeanDefinitionResolver;
 
 import javax.script.ScriptEngine;
 import java.util.NoSuchElementException;
+import java.util.function.Function;
 
 @Slf4j
 @RequiredArgsConstructor
@@ -18,7 +20,7 @@ public class DefaultEventProcessor implements EventProcessor {
 
     private final RefreshableScope refreshableScope;
 
-    private final ScriptEngine scriptEngine;
+    private final Function<ClassLoader, ScriptEngine> scriptEngineGetter;
 
     @Override
     public void processEvent(RefreshBeanEvent refreshBeanEvent) {
@@ -35,12 +37,17 @@ public class DefaultEventProcessor implements EventProcessor {
 
     // 新增时，注册 BeanDefinition
     private void add(RefreshBeanModel refreshBeanModel) {
-        var beanName = refreshBeanModel.beanName();
-        var beanDefinition = defaultListableBeanFactory.getBeanDefinition(beanName);
-        Assert.isTrue(beanDefinition, Assert::isNull, () -> new IllegalArgumentException("beanDefinition already exists"));
-        var beanDefinitionHolder = RefreshableBeanDefinitionResolver.resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngine, refreshableScope);
-        defaultListableBeanFactory.registerBeanDefinition(beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition());
-        log.info("add beanDefinition: {}", beanDefinitionHolder.getBeanName());
+        try {
+            var beanName = refreshBeanModel.beanName();
+            var beanDefinition = defaultListableBeanFactory.getBeanDefinition(beanName);
+            // 存在时，抛出 IllegalArgumentException 异常
+            Assert.isTrue(beanDefinition, Assert::isNull, () -> new IllegalArgumentException("beanDefinition already exists"));
+        } catch (NoSuchBeanDefinitionException e) {
+            // 不存在时，注册 BeanDefinition
+            var beanDefinitionHolder = RefreshableBeanDefinitionResolver.resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngineGetter, refreshableScope);
+            defaultListableBeanFactory.registerBeanDefinition(beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition());
+            log.info("add beanDefinition: {}", beanDefinitionHolder.getBeanName());
+        }
     }
 
     // 删除时，删除 Bean实例, 并删除 BeanDefinition。

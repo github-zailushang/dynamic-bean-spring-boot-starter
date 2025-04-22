@@ -1,0 +1,41 @@
+### 获取数据库或redis中的所有 refreshBean 列表
+GET http://localhost:8080/refreshBean/list
+
+
+
+### 获取内存中已注册的 refreshBean类型的 所有beanName
+GET http://localhost:8080/beans
+
+
+
+### 新增 bean
+POST http://localhost:8080/refreshBean
+Content-Type: application/json
+
+{
+  "beanName": "run-test",
+  "lambdaScript": "return { param -> println \"test running ...\" } as shop.zailushang.spring.boot.framework.SAM",
+  "description": "test任务"
+}
+
+
+
+### 测试运行 bean
+GET http://localhost:8080/run/run-test
+
+
+
+### 修改bean，beanName 不允许修改
+PUT http://localhost:8080/refreshBean
+Content-Type: application/json
+
+{
+  "beanName": "run-test",
+  "lambdaScript": "return { param -> println \"test running 11111111...\" } as shop.zailushang.spring.boot.framework.SAM",
+  "description": "test任务1111"
+}
+
+
+
+### 删除bean
+DELETE http://localhost:8080/refreshBean/test

@@ -4,6 +4,7 @@ import com.alibaba.otter.canal.client.CanalConnector;
 import com.alibaba.otter.canal.client.CanalConnectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.support.BeanDefinitionRegistryPostProcessor;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
@@ -27,6 +28,7 @@ import shop.zailushang.spring.boot.util.RefreshableBeanDefinitionResolver;
 
 import javax.script.ScriptEngine;
 import java.net.InetSocketAddress;
+import java.util.function.Function;
 
 @Configuration
 public class DatabaseAutoModeAutoConfiguration {
@@ -38,10 +40,10 @@ public class DatabaseAutoModeAutoConfiguration {
     static class DatabaseAutoModeSourceRegistrar {
         // BeanDefinition 注册器
         @Bean
-        public static BeanDefinitionRegistryPostProcessor beanDefinitionRegistryPostProcessor(Environment environment, ScriptEngine scriptEngine, RefreshableScope refreshableScope) {
+        public static BeanDefinitionRegistryPostProcessor beanDefinitionRegistryPostProcessor(Environment environment, @Qualifier("groovyGetter") Function<ClassLoader, ScriptEngine> scriptEngineGetter, RefreshableScope refreshableScope) {
             return registry -> {
                 log.info("starting DatabaseAutoMode BeanDefinitionRegistry.");
-                var beanDefinitionHolders = RefreshableBeanDefinitionResolver.resolveBeanDefinitionFromDatabase(environment, scriptEngine, refreshableScope);
+                var beanDefinitionHolders = RefreshableBeanDefinitionResolver.resolveBeanDefinitionFromDatabase(environment, scriptEngineGetter, refreshableScope);
                 beanDefinitionHolders.forEach(beanDefinitionHolder -> registry.registerBeanDefinition(beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition()));
             };
         }
@@ -72,7 +74,7 @@ public class DatabaseAutoModeAutoConfiguration {
         private final ApplicationEventPublisher applicationEventPublisher;
         private final DefaultListableBeanFactory defaultListableBeanFactory;
         private final RefreshableScope refreshableScope;
-        private final ScriptEngine scriptEngine;
+        private final Function<ClassLoader, ScriptEngine> scriptEngineGetter;
 
         @Async
         @EventListener(ApplicationReadyEvent.class)
@@ -84,7 +86,7 @@ public class DatabaseAutoModeAutoConfiguration {
         @Async
         @TransactionalEventListener(RefreshBeanEvent.class)
         public void eventListener(RefreshBeanEvent refreshBeanEvent) {
-            new DefaultEventProcessor(defaultListableBeanFactory, refreshableScope, scriptEngine)
+            new DefaultEventProcessor(defaultListableBeanFactory, refreshableScope, scriptEngineGetter)
                     .processEvent(refreshBeanEvent);
         }
     }

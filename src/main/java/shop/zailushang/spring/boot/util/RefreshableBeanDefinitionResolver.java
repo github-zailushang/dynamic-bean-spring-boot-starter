@@ -1,5 +1,6 @@
 package shop.zailushang.spring.boot.util;
 
+import groovy.lang.GroovyClassLoader;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
 import lombok.extern.slf4j.Slf4j;
@@ -14,15 +15,14 @@ import shop.zailushang.spring.boot.framework.RefreshableScope;
 import shop.zailushang.spring.boot.pubsub.redis.RedisConst;
 
 import javax.script.ScriptEngine;
-import javax.script.ScriptException;
-
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Slf4j
 public class RefreshableBeanDefinitionResolver {
     // 从数据库中获取所有需要动态注册的Bean定义
-    public static Set<BeanDefinitionHolder> resolveBeanDefinitionFromDatabase(Environment environment, ScriptEngine scriptEngine, RefreshableScope refreshableScope) {
+    public static Set<BeanDefinitionHolder> resolveBeanDefinitionFromDatabase(Environment environment, Function<ClassLoader, ScriptEngine> scriptEngineGetter, RefreshableScope refreshableScope) {
         var jdbcTemplate = resolverEarlyJdbcTemplate(environment);
         var refreshBeanList = jdbcTemplate.query(
                 "select * from refresh_bean",
@@ -33,20 +33,20 @@ public class RefreshableBeanDefinitionResolver {
                         rs.getString("description")
                 ));
         return refreshBeanList.stream()
-                .map(refreshBeanModel -> resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngine, refreshableScope))
+                .map(refreshBeanModel -> resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngineGetter, refreshableScope))
                 .peek(beanDefinitionHolder -> log.debug("register beanDefinition, {} => {}", beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition()))
                 .collect(Collectors.toSet());
     }
 
     // 从Redis中获取所有需要动态注册的Bean定义
-    public static Set<BeanDefinitionHolder> resolveBeanDefinitionFromRedis(Environment environment, ScriptEngine scriptEngine, RefreshableScope refreshableScope) {
+    public static Set<BeanDefinitionHolder> resolveBeanDefinitionFromRedis(Environment environment, Function<ClassLoader, ScriptEngine> scriptEngineGetter, RefreshableScope refreshableScope) {
         try (var redisClient = resolverEarlyRedisClient(environment); var connect = redisClient.connect()) {
             return connect.sync()
                     .hgetall(RedisConst.REFRESH_BEAN_KEY)
                     .values()
                     .stream()
                     .map(RefreshBeanModel::parse)
-                    .map(refreshBeanModel -> resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngine, refreshableScope))
+                    .map(refreshBeanModel -> resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngineGetter, refreshableScope))
                     .peek(beanDefinitionHolder -> log.debug("register beanDefinition, {} => {}", beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition()))
                     .collect(Collectors.toSet());
         } catch (Exception e) {
@@ -55,10 +55,12 @@ public class RefreshableBeanDefinitionResolver {
     }
 
     // 根据 RefreshBeanModel 创建 BeanDefinitionHolder
-    public static BeanDefinitionHolder resolveBeanDefinitionFromModel(RefreshBeanModel refreshBeanModel, ScriptEngine scriptEngine, RefreshableScope refreshableScope) {
+    public static BeanDefinitionHolder resolveBeanDefinitionFromModel(RefreshBeanModel refreshBeanModel, Function<ClassLoader, ScriptEngine> scriptEngineGetter, RefreshableScope refreshableScope) {
         var lambdaScript = refreshBeanModel.lambdaScript();
         var beanName = refreshBeanModel.beanName();
-        try {
+        // 每个动态类使用唯一的 ClassLoader 加载，用完即抛，防止内存泄露
+        try (var classLoader = new GroovyClassLoader()) {
+            var scriptEngine = scriptEngineGetter.apply(classLoader);
             var target = scriptEngine.eval(lambdaScript);
             // 注册Bean定义
             var beanDefinition = BeanDefinitionBuilder
@@ -67,7 +69,7 @@ public class RefreshableBeanDefinitionResolver {
                     .setScope(refreshableScope.name())
                     .getBeanDefinition();
             return new BeanDefinitionHolder(beanDefinition, beanName);
-        } catch (ScriptException e) {
+        } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }

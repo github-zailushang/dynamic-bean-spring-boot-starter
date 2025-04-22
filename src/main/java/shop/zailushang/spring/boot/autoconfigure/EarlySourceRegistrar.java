@@ -11,6 +11,7 @@ import shop.zailushang.spring.boot.framework.RefreshableScope;
 import javax.script.ScriptContext;
 import javax.script.ScriptEngine;
 import javax.script.ScriptEngineManager;
+import java.util.function.Function;
 
 // 提前初始化的资源配置
 @Configuration
@@ -35,15 +36,17 @@ public class EarlySourceRegistrar {
     }
 
     // groovy 脚本引擎
-    @Bean("groovy")
+    @Bean("groovyGetter")
     @DependsOn("inheritableThreadLocal")
-    public static ScriptEngine scriptEngine(ApplicationContext applicationContext, @Qualifier("inheritableThreadLocal") InheritableThreadLocal<Object> inheritableThreadLocal) {
-        var scriptEngineManager = new ScriptEngineManager();
-        var groovy = scriptEngineManager.getEngineByName("groovy");
-        var context = groovy.getContext();
-        // 绑定上下文对象
-        context.setAttribute("act", applicationContext, ScriptContext.ENGINE_SCOPE);
-        context.setAttribute("itl", inheritableThreadLocal, ScriptContext.ENGINE_SCOPE);
-        return groovy;
+    public static Function<ClassLoader, ScriptEngine> scriptEngineGetter(ApplicationContext applicationContext, @Qualifier("inheritableThreadLocal") InheritableThreadLocal<Object> inheritableThreadLocal) {
+        return classLoader -> {
+            var scriptEngineManager = new ScriptEngineManager(classLoader);
+            var groovy = scriptEngineManager.getEngineByName("groovy");
+            var context = groovy.getContext();
+            // 绑定上下文对象
+            context.setAttribute("act", applicationContext, ScriptContext.ENGINE_SCOPE);
+            context.setAttribute("itl", inheritableThreadLocal, ScriptContext.ENGINE_SCOPE);
+            return groovy;
+        };
     }
 }
