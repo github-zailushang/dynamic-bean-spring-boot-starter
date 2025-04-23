@@ -81,7 +81,6 @@ public class RefreshableBeanDefinitionResolver {
         var username = environment.getProperty("spring.datasource.username");
         var password = environment.getProperty("spring.datasource.password", "");
         var dataSource = new DriverManagerDataSource(url, username, password);
-        // 连接数据库，加载配置类
         return new JdbcTemplate(dataSource);
     }
 

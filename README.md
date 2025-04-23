@@ -1,9 +1,5 @@
 ### 推其致乱之由，殆始于桓、灵二帝（背景篇）
 
-(；￣Д￣）
-/|\
-/ \
-
 于传统的 Spring Bean 管理模式下，通常具有以下局限性
 
 - 强依赖编译期注解解析生成 Bean
@@ -25,11 +21,7 @@
 
 ### 汝剑利，吾剑未尝不利；云愿往，飞亦愿往（原理篇一：启动时同步）
 
-(￣へ￣)ﾉ
-/|\\=︻╦̵̵̿╤─
-/ \
-
-Spring 在扫描、解析配置后，以及创建 Bean 之前，会将要创建的 Bean 的元信息，生成一系列的 BeanDefinition 对象（即创建 Bean 对象的蓝图），放置在一个 Map 中，并且向外提供一个参与时机（生命周期方法 BeanDefinitionRegistryPostProcessor），允许使用者从外部参与修改该 Map 中的 BeanDefinition，在将 MyBatis 整合至 Spring Boot 中时，也是利用了此时机，扫描 Mapper，注册成代理工厂方法（MapperFactoryBean）。我们也可以利用此时机，实现在 Spring 容器启动时，读取 MySql、Redis配置信息，使用脚本引擎解析、加载成动态类，生成 BeanDefinition，并最终注册至我们自定义的 RefreshableScope 域中，实现对象的区域自治 。
+Spring 在扫描、解析配置后，以及创建 Bean 之前，会将要创建的 Bean 的元信息，生成一系列的 BeanDefinition 对象（即创建 Bean 对象的蓝图），放置在一个 Map 中，并且向外提供一个参与时机（生命周期接口 BeanDefinitionRegistryPostProcessor），允许使用者从外部参与修改该 Map 中的 BeanDefinition，在将 MyBatis 整合至 Spring Boot 中时，也是利用了此时机，扫描 Mapper，注册成代理工厂方法（MapperFactoryBean）。我们也可以利用此时机，实现在 Spring 容器启动时，读取 MySql、Redis 配置信息，使用脚本引擎解析、加载成动态类，生成 BeanDefinition，并最终注册至我们自定义的 RefreshableScope 域中，实现 Bean 对象的区域自治 。
 
 ###### 流程图：
 
@@ -121,7 +113,6 @@ public class RefreshableBeanDefinitionResolver {
         var username = environment.getProperty("spring.datasource.username");
         var password = environment.getProperty("spring.datasource.password", "");
         var dataSource = new DriverManagerDataSource(url, username, password);
-        // 连接数据库，加载配置类
         return new JdbcTemplate(dataSource);
     }
 
@@ -176,15 +167,11 @@ public class RefreshableScope implements Scope {
 
 ### 云长恐有他变，不敢下马，用青龙刀尖挑锦袍披于身上，勒马回头称谢曰：“蒙丞相赐袍，异日更得相会。”（原理篇二：运行时更新）
 
-(￣_,￣ )
-/|\
-/ \
+在运行时，增删改 Bean，我提供了以下三个 mode 可供选择：
 
-在运行时，进行增删改 Bean，我提供了以下三个 mode：
+- database：提供一套增删改数据库配置的接口，在操作 mysql 配置表的同时，发布事件异步处理 Bean 实例以及 BeanDefinition 的增删改。
 
-- database：提供一套增删改数据库配置的接口，在操作 mysql 配置表的同时，发布事件异步处理 BeanDefinition 的增删改。
-
-- redis：提供一套增删改数据库配置的接口，在操作 redis hset 的同时，发布事件异步处理 BeanDefinition 的增删改。
+- redis：提供一套增删改数据库配置的接口，在操作 redis hset 的同时，发布事件异步处理 Bean 实例以及 BeanDefinition 的增删改。
 
 - database-auto：使用 canal 监听 mysql 配置表的增删改，解析 mysql binlog 增量日志，修改表数据时，自动触发 BeanDefinition，无需手动调用接口。
 - redis-auto：暂未提供。【画外音，redis pubsub（ keyspace notifications）：关某自随兄长征战，许多年来，未尝落后。今日逢大敌，军师却不委用，此是何意？】
@@ -373,7 +360,7 @@ public class DefaultEventProcessor implements EventProcessor {
 }
 ```
 
-database-auto mode 下，通过一个 canalConnector 长链接轮询表的增删改事件，在操作 mysql 表时，自动同步处理 spring bean。
+database-auto mode 下，通过一个 canalConnector 长链接轮询表的增删改事件，在操作 mysql 表时，自动同步处理 spring bean 以及 BeanDefinition。
 
 ```java
 @Slf4j
@@ -477,10 +464,6 @@ public class CanalClientListener {
 
 ### 豫州当日叹孤穷，何幸南阳有卧龙！欲识他年分鼎处，先生笑指画图中。（配置篇）
 
-(￣_,￣ )
-/|\
-/ \
-
 配置示例，如下
 
 ```yaml
@@ -533,7 +516,7 @@ CREATE TABLE `refresh_bean` (
   `lambda_script` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'SAM类源码',
   `description` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '描述信息',
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=19 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 INSERT INTO `refresh_bean` VALUES (1, 'runnable-task', 'return { param -> println \"Runnable running ...\" } as shop.zailushang.spring.boot.framework.SAM', '任务型接口示例：无参无返回值');
 INSERT INTO `refresh_bean` VALUES (2, 'consumer-task', 'return { param -> println \"Hello $param\" } as shop.zailushang.spring.boot.framework.SAM', '消费型接口示例：单参无返回值');
@@ -557,19 +540,20 @@ HSET "$_____refresh_bean_____$"
   "run-4-itl" '{"id":"","beanName":"run-4-itl","lambdaScript":"return { param -> println \"itl.get() = ${itl.get()}, in groovy.\"; itl.remove(); } as shop.zailushang.spring.boot.framework.SAM","description":"使用内置对象 itl 获取线程变量示例"}'
 ```
 
-Tip：其中，id 字段不重要，不承载业务，所以，mysql 中简单自增就行，redis 中可以不存。承载实际增删改业务的逻辑主键为 bean_nam，要求唯一，且不可修改 bean_name，如想修改 bean_name，正确做法是删除后新增。
+Tip：其中，id 字段不重要，不承载业务，所以，mysql 中简单自增就行，redis 中可以不存。承载实际增删改业务的逻辑主键为 bean_name，要求唯一，且不可修改 bean_name，如想修改 bean_name，正确做法是删除后新增。
 
-以上 lambdaScript 存储的为 Groovy 脚本，使用时，格式如下:
+以上 lambda_script 字段中存储的为 Groovy 脚本，格式如下:
 
 ```groovy
 return { param ->
-...
+...// 更详细的使用示例见：启动篇
 } as shop.zailushang.spring.boot.framework.SAM
 ```
 
-绑定上下文变量，代码如下：
+Groovy 脚本环境已绑定的上下文级变量，代码如下：
 
 ```java
+// groovy 脚本环境下绑定此 InheritableThreadLocal 进行个性化参数传递
 @Bean("inheritableThreadLocal")
 public static InheritableThreadLocal<Object> inheritableThreadLocal() {
     return new InheritableThreadLocal<>();
@@ -593,7 +577,7 @@ public static Function<ClassLoader, ScriptEngine> scriptEngineGetter(Application
 
 为什么选择使用 Groovy?
 
-Groovy 同属 JVM 语言，高度兼容 Java 代码，与 Java 代码无缝互操作，其本身具有动态语言特性：动态类型，元编程能力、允许在运行时修改类或方法，可以轻松用于构建 DSL，我愿称其为 the real java script。
+Groovy 同属 JVM 语言，高度兼容 Java 代码，与 Java 代码无缝互操作，其本身具有动态语言特性：动态类型，元编程能力、允许在运行时修改类或方法，可以轻松用于构建 DSL，我愿称其为 the real java script。使用其，可以很轻松的实现将类似 "()->{}" 这样的字符串加载成动态类的功能。
 
 关于 Groovy 中的 SAM（Single Abstract Method），即单一抽象方法，对应 Java 中的 @FunctionalInterface，我已将常见的函数式接口封装成以下统一的实现，通过 Groovy 加载脚本解析加载的动态类，最终都会被加载成一个 SAM 的实现类。
 
@@ -674,10 +658,6 @@ public class SAMProxyFactoryBean<T, R> implements FactoryBean<SAM<T, R>> {
 
 ### 待某去屋后放一把火，却看他起也不起？（启动篇）
 
-(╬◣д◢)
-/|\
-/ \
-
 功能性测试示例，演示如下：
 
 ```java
@@ -735,7 +715,7 @@ public class DatabaseLambdaScriptTests {
         runnable.run();
     }
 
-    // 测试 使用InheritableThreadLocal查找依赖 任务id 7
+    // 测试 使用InheritableThreadLocal传递线程变量 任务id 7
     @Test
     void threadLocalTest() {
         var inheritableThreadLocal = applicationContext.getBean(InheritableThreadLocal.class);
@@ -798,13 +778,31 @@ groovy 脚本环境下，绑定参数的使用示例
 
 ```groovy
 // 或在此导包，或使用全限定类名
+import shop.zailushang.spring.boot.framework.SAM;
 return { param ->
-    // 此处可无缝使用 java 类
-    /* 除入参 param 外，此处还额外绑定了上下文级的变量 act（ApplicationContext） 用以获取 spring 内部的任意 bean 对象
-     * 变量 itl （InheritableThreadLocal）用以实现线程隔离传参，具体使用示例见：启动篇
-     */ 
+    // 此处可无缝使用 java 类，不了解 groovy 语法也没关系，这里可以完全当 java 来写
+    // 除入参 param 外，此处还额外绑定了上下文级的变量 act（ApplicationContext） 用以获取 spring 内部的任意 bean 对象
+    // 变量 itl （InheritableThreadLocal）用以实现线程隔离传参，见测试案例任务id 7
 	def xxx = act.getBean("bean名字", XXX.class) // 根据实际情况选择在上面导包或者使用全限定类名，任务6为依赖查找示例
-    def xxx = itl.get() // 任务7为使用InheritableThreadLocal传参示例，注意使用完zai finally 块中移除，防止内存泄露
+    def xxx = itl.get() // 任务7为使用InheritableThreadLocal传参示例，注意使用完在 finally 块中移除，防止内存泄露
+} as SAM
+```
+
+编写脚本时，可以这样做：
+
+```
+// 在任意类中声名一个这样的方法体，在其中编写业务逻辑，
+Object xx(ApplicationContext act, InheritableThreadLocal<Object> itl, Ojbect param){
+	// 此处使用的类如需导包，在脚本环境下也需要进行相应的导包处理
+	// 除此之外，只需将此方法的方法体原封不动的拷贝至下面即可
+	// 此处的 param 类型，以及返回值类型，可以是任意类型，取决于你想使用什么参数，就按照什么类型来处理，使用时你按处理时的类型传参即可
+	// 返回值同理，你这里返回什么类型，就在使用时，用对应的类型去接收
+}
+
+
+import xxx.xxx.xxx;
+return { param ->
+	// 嵌入方法体
 } as shop.zailushang.spring.boot.framework.SAM
 ```
 
@@ -838,4 +836,4 @@ public class TestClass {
 
 ### 岁在甲子，天下大吉（完结篇）
 
-[源码](https://github.com/github-zailushang/dynamic-bean-spring-boot-starter)已托管，THE END。
+[源码](https://github.com/github-zailushang/dynamic-bean-spring-boot-starter)已托管，数据库存储代码，或可能存在注入风险，System.exit(0);  不过话说回来，如果攻击者都能操作你的数据库了，也犯不着再在数据库中再注什么内存马了，风险需自行评估。THE END。

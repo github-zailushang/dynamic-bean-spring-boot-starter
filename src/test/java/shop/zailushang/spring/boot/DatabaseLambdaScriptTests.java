@@ -64,7 +64,7 @@ public class DatabaseLambdaScriptTests {
         runnable.run();
     }
 
-    // 测试 使用InheritableThreadLocal查找依赖 任务id 7
+    // 测试 使用InheritableThreadLocal传递线程变量 任务id 7
     @Test
     void threadLocalTest() {
         var inheritableThreadLocal = applicationContext.getBean(InheritableThreadLocal.class);
