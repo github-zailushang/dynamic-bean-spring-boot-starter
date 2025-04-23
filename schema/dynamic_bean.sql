@@ -21,12 +21,12 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- Table structure for refresh_bean
 -- ----------------------------
 DROP TABLE IF EXISTS `refresh_bean`;
-CREATE TABLE `refresh_bean`  (
-  `id` int(0) NOT NULL AUTO_INCREMENT,
-  `bean_name` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
-  `lambda_script` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
-  `description` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+CREATE TABLE `refresh_bean` (
+    `id` int NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `bean_name` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'bean在内存中名字',
+    `lambda_script` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'SAM类源码',
+    `description` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '描述信息',
+    PRIMARY KEY (`id`)
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------

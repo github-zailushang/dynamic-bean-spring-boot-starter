@@ -38,4 +38,4 @@ Content-Type: application/json
 
 
 ### 删除bean
-DELETE http://localhost:8080/refreshBean/test
+DELETE http://localhost:8080/refreshBean/run-test

@@ -25,6 +25,7 @@ public class SAMProxyFactoryBean<T, R> implements FactoryBean<SAM<T, R>> {
         return proxy;
     }
 
+    // 使用 jdk 动态代理生成代理对象
     @SuppressWarnings("unchecked")
     private SAM<T, R> createProxy() {
         return (SAM<T, R>) Proxy.newProxyInstance(

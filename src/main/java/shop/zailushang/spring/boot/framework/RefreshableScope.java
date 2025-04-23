@@ -8,6 +8,7 @@ import org.springframework.lang.NonNull;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+// 自定义域对象，存储 RefreshAble Bean
 public class RefreshableScope implements Scope {
 
     private final Map<String, FactoryBean<SAM<?, ?>>> factoryBeanCache = new ConcurrentHashMap<>();
