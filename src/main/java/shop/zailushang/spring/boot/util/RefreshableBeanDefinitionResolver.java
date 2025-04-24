@@ -10,19 +10,18 @@ import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import shop.zailushang.spring.boot.framework.SAMProxyFactoryBean;
+import shop.zailushang.spring.boot.framework.ScriptEngineCreator;
 import shop.zailushang.spring.boot.model.RefreshBeanModel;
 import shop.zailushang.spring.boot.framework.RefreshableScope;
 import shop.zailushang.spring.boot.pubsub.redis.RedisConst;
 
-import javax.script.ScriptEngine;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Slf4j
 public class RefreshableBeanDefinitionResolver {
     // 从数据库中获取所有需要动态注册的Bean定义
-    public static Set<BeanDefinitionHolder> resolveBeanDefinitionFromDatabase(Environment environment, Function<ClassLoader, ScriptEngine> scriptEngineGetter, RefreshableScope refreshableScope) {
+    public static Set<BeanDefinitionHolder> resolveBeanDefinitionFromDatabase(Environment environment, ScriptEngineCreator scriptEngineCreator, RefreshableScope refreshableScope) {
         var jdbcTemplate = resolverEarlyJdbcTemplate(environment);
         var refreshBeanList = jdbcTemplate.query(
                 "select * from refresh_bean",
@@ -33,20 +32,20 @@ public class RefreshableBeanDefinitionResolver {
                         rs.getString("description")
                 ));
         return refreshBeanList.stream()
-                .map(refreshBeanModel -> resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngineGetter, refreshableScope))
+                .map(refreshBeanModel -> resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngineCreator, refreshableScope))
                 .peek(beanDefinitionHolder -> log.debug("register beanDefinition, {} => {}", beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition()))
                 .collect(Collectors.toSet());
     }
 
     // 从Redis中获取所有需要动态注册的Bean定义
-    public static Set<BeanDefinitionHolder> resolveBeanDefinitionFromRedis(Environment environment, Function<ClassLoader, ScriptEngine> scriptEngineGetter, RefreshableScope refreshableScope) {
+    public static Set<BeanDefinitionHolder> resolveBeanDefinitionFromRedis(Environment environment, ScriptEngineCreator scriptEngineCreator, RefreshableScope refreshableScope) {
         try (var redisClient = resolverEarlyRedisClient(environment); var connect = redisClient.connect()) {
             return connect.sync()
                     .hgetall(RedisConst.REFRESH_BEAN_KEY)
                     .values()
                     .stream()
                     .map(RefreshBeanModel::parse)
-                    .map(refreshBeanModel -> resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngineGetter, refreshableScope))
+                    .map(refreshBeanModel -> resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngineCreator, refreshableScope))
                     .peek(beanDefinitionHolder -> log.debug("register beanDefinition, {} => {}", beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition()))
                     .collect(Collectors.toSet());
         } catch (Exception e) {
@@ -55,16 +54,15 @@ public class RefreshableBeanDefinitionResolver {
     }
 
     // 根据 RefreshBeanModel 创建 BeanDefinitionHolder
-    public static BeanDefinitionHolder resolveBeanDefinitionFromModel(RefreshBeanModel refreshBeanModel, Function<ClassLoader, ScriptEngine> scriptEngineGetter, RefreshableScope refreshableScope) {
+    public static BeanDefinitionHolder resolveBeanDefinitionFromModel(RefreshBeanModel refreshBeanModel, ScriptEngineCreator scriptEngineCreator, RefreshableScope refreshableScope) {
         var lambdaScript = refreshBeanModel.lambdaScript();
         var beanName = refreshBeanModel.beanName();
         // 每个动态类使用唯一的 ClassLoader 加载，用完即抛，防止内存泄露
         try (var classLoader = new GroovyClassLoader()) {
-            var scriptEngine = scriptEngineGetter.apply(classLoader);
+            var scriptEngine = scriptEngineCreator.createScriptEngine(classLoader);
             var target = scriptEngine.eval(lambdaScript);
-            // 注册Bean定义
-            var beanDefinition = BeanDefinitionBuilder
-                    .genericBeanDefinition(SAMProxyFactoryBean.class)
+            // 生成 Bean定义
+            var beanDefinition = BeanDefinitionBuilder.genericBeanDefinition(SAMProxyFactoryBean.class)
                     .addConstructorArgValue(target)
                     .setScope(refreshableScope.name())
                     .getBeanDefinition();

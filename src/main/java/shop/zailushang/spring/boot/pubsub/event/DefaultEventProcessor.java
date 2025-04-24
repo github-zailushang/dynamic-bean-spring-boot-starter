@@ -4,14 +4,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
+import shop.zailushang.spring.boot.framework.ScriptEngineCreator;
 import shop.zailushang.spring.boot.model.RefreshBeanModel;
 import shop.zailushang.spring.boot.framework.RefreshableScope;
 import shop.zailushang.spring.boot.util.Assert;
 import shop.zailushang.spring.boot.util.RefreshableBeanDefinitionResolver;
-
-import javax.script.ScriptEngine;
-import java.util.NoSuchElementException;
-import java.util.function.Function;
 
 @Slf4j
 @RequiredArgsConstructor
@@ -20,7 +17,7 @@ public class DefaultEventProcessor implements EventProcessor {
 
     private final RefreshableScope refreshableScope;
 
-    private final Function<ClassLoader, ScriptEngine> scriptEngineGetter;
+    private final ScriptEngineCreator scriptEngineCreator;
 
     @Override
     public void processEvent(RefreshBeanEvent refreshBeanEvent) {
@@ -43,20 +40,21 @@ public class DefaultEventProcessor implements EventProcessor {
             // 存在时，抛出 IllegalArgumentException 异常
             Assert.isTrue(beanDefinition, Assert::isNull, () -> new IllegalArgumentException("beanDefinition already exists"));
         } catch (NoSuchBeanDefinitionException e) {
-            // 不存在时，注册 BeanDefinition
-            var beanDefinitionHolder = RefreshableBeanDefinitionResolver.resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngineGetter, refreshableScope);
-            defaultListableBeanFactory.registerBeanDefinition(beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition());
-            log.info("add beanDefinition: {}", beanDefinitionHolder.getBeanName());
+            // 当 BeanDefinition 不存在时
+            var beanDefinitionHolder = RefreshableBeanDefinitionResolver.resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngineCreator, refreshableScope);
+            var beanName = beanDefinitionHolder.getBeanName();
+            var beanDefinition = beanDefinitionHolder.getBeanDefinition();
+            // 注册 BeanDefinition
+            defaultListableBeanFactory.registerBeanDefinition(beanName, beanDefinition);
+            log.info("add beanDefinition: {}", beanName);
         }
     }
 
     // 删除时，删除 Bean实例, 并删除 BeanDefinition。
     private void del(RefreshBeanModel refreshBeanModel) {
         var beanName = refreshBeanModel.beanName();
-        var beanDefinition = defaultListableBeanFactory.getBeanDefinition(beanName);
-        Assert.isTrue(beanDefinition, Assert::isNotNull, () -> new NoSuchElementException("beanDefinition not found"));
-        refreshableScope.remove(refreshBeanModel.beanName());
-        defaultListableBeanFactory.removeBeanDefinition(refreshBeanModel.beanName());
+        // 移除 Bean 实例 自动触发销毁回调
+        refreshableScope.remove(beanName);
         log.info("del beanDefinition: {}", beanName);
     }
 }

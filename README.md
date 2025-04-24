@@ -173,7 +173,7 @@ public class RefreshableScope implements Scope {
 
 - redis：提供一套增删改数据库配置的接口，在操作 redis hset 的同时，发布事件异步处理 Bean 实例以及 BeanDefinition 的增删改。
 
-- database-auto：使用 canal 监听 mysql 配置表的增删改，解析 mysql binlog 增量日志，修改表数据时，自动触发 BeanDefinition，无需手动调用接口。
+- database-auto：使用 canal 监听 mysql 配置表的增删改，解析 mysql binlog 增量日志，修改表数据时，通过长轮询自动触发 Bean 实例及 BeanDefinition 后续操作，无需手动调用接口。
 - redis-auto：暂未提供。【画外音，redis pubsub（ keyspace notifications）：关某自随兄长征战，许多年来，未尝落后。今日逢大敌，军师却不委用，此是何意？】
 
 database mode 接口代码如下：
@@ -511,11 +511,11 @@ dynamic-bean:
 
 ```sql
 CREATE TABLE `refresh_bean` (
-  `id` int NOT NULL AUTO_INCREMENT COMMENT '主键',
-  `bean_name` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'bean在内存中名字',
-  `lambda_script` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'SAM类源码',
-  `description` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '描述信息',
-  PRIMARY KEY (`id`)
+                                `id` int NOT NULL AUTO_INCREMENT COMMENT '主键',
+                                `bean_name` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'bean在内存中名字',
+                                `lambda_script` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'SAM类源码',
+                                `description` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '描述信息',
+                                PRIMARY KEY (`id`)
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 INSERT INTO `refresh_bean` VALUES (1, 'runnable-task', 'return { param -> println \"Runnable running ...\" } as shop.zailushang.spring.boot.framework.SAM', '任务型接口示例：无参无返回值');
@@ -546,7 +546,7 @@ Tip：其中，id 字段不重要，不承载业务，所以，mysql 中简单�
 
 ```groovy
 return { param ->
-...// 更详细的使用示例见：启动篇
+    ...// 更详细的使用示例见：启动篇
 } as shop.zailushang.spring.boot.framework.SAM
 ```
 
@@ -783,7 +783,7 @@ return { param ->
     // 此处可无缝使用 java 类，不了解 groovy 语法也没关系，这里可以完全当 java 来写
     // 除入参 param 外，此处还额外绑定了上下文级的变量 act（ApplicationContext） 用以获取 spring 内部的任意 bean 对象
     // 变量 itl （InheritableThreadLocal）用以实现线程隔离传参，见测试案例任务id 7
-	def xxx = act.getBean("bean名字", XXX.class) // 根据实际情况选择在上面导包或者使用全限定类名，任务6为依赖查找示例
+    def xxx = act.getBean("bean名字", XXX.class) // 根据实际情况选择在上面导包或者使用全限定类名，任务6为依赖查找示例
     def xxx = itl.get() // 任务7为使用InheritableThreadLocal传参示例，注意使用完在 finally 块中移除，防止内存泄露
 } as SAM
 ```
@@ -813,13 +813,13 @@ return { param ->
 @Component
 public class TestClass {
     @Autowired
-    @Qualifier("bean名字") 
-	private Sam<?,?> sam;
+    @Qualifier("bean名字")
+    private Sam<?,?> sam;
 }
 
 // 建议的用法，通过 ApplicationContext 查找
 public class TestClass {
-	public void xxx(){
+    public void xxx(){
         var bean = ApplicationContext.getBean("bean名字",SAM.class);
         // bean 已经实现了大多数函数式接口 参考任务 1-5 示例
     }

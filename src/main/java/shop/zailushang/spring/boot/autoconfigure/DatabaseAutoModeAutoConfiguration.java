@@ -20,15 +20,14 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.transaction.event.TransactionalEventListener;
 import shop.zailushang.spring.boot.framework.RefreshableScope;
+import shop.zailushang.spring.boot.framework.ScriptEngineCreator;
 import shop.zailushang.spring.boot.pubsub.database.CanalClientListener;
 import shop.zailushang.spring.boot.pubsub.database.CanalConfigurationProperties;
 import shop.zailushang.spring.boot.pubsub.event.DefaultEventProcessor;
 import shop.zailushang.spring.boot.pubsub.event.RefreshBeanEvent;
 import shop.zailushang.spring.boot.util.RefreshableBeanDefinitionResolver;
 
-import javax.script.ScriptEngine;
 import java.net.InetSocketAddress;
-import java.util.function.Function;
 
 @Configuration
 public class DatabaseAutoModeAutoConfiguration {
@@ -40,10 +39,10 @@ public class DatabaseAutoModeAutoConfiguration {
     static class DatabaseAutoModeSourceRegistrar {
         // BeanDefinition 注册器
         @Bean
-        public static BeanDefinitionRegistryPostProcessor beanDefinitionRegistryPostProcessor(Environment environment, @Qualifier("groovyGetter") Function<ClassLoader, ScriptEngine> scriptEngineGetter, RefreshableScope refreshableScope) {
+        public static BeanDefinitionRegistryPostProcessor beanDefinitionRegistryPostProcessor(Environment environment, @Qualifier("groovyCreator") ScriptEngineCreator scriptEngineCreator, RefreshableScope refreshableScope) {
             return registry -> {
                 log.info("starting DatabaseAutoMode BeanDefinitionRegistry.");
-                var beanDefinitionHolders = RefreshableBeanDefinitionResolver.resolveBeanDefinitionFromDatabase(environment, scriptEngineGetter, refreshableScope);
+                var beanDefinitionHolders = RefreshableBeanDefinitionResolver.resolveBeanDefinitionFromDatabase(environment, scriptEngineCreator, refreshableScope);
                 beanDefinitionHolders.forEach(beanDefinitionHolder -> registry.registerBeanDefinition(beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition()));
             };
         }
@@ -74,7 +73,7 @@ public class DatabaseAutoModeAutoConfiguration {
         private final ApplicationEventPublisher applicationEventPublisher;
         private final DefaultListableBeanFactory defaultListableBeanFactory;
         private final RefreshableScope refreshableScope;
-        private final Function<ClassLoader, ScriptEngine> scriptEngineGetter;
+        private final ScriptEngineCreator scriptEngineCreator;
 
         @Async
         @EventListener(ApplicationReadyEvent.class)
@@ -86,7 +85,7 @@ public class DatabaseAutoModeAutoConfiguration {
         @Async
         @TransactionalEventListener(RefreshBeanEvent.class)
         public void eventListener(RefreshBeanEvent refreshBeanEvent) {
-            new DefaultEventProcessor(defaultListableBeanFactory, refreshableScope, scriptEngineGetter)
+            new DefaultEventProcessor(defaultListableBeanFactory, refreshableScope, scriptEngineCreator)
                     .processEvent(refreshBeanEvent);
         }
     }

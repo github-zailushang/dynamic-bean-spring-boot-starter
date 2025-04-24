@@ -2,24 +2,24 @@ package shop.zailushang.spring.boot.autoconfigure;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
+import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.DependsOn;
 import shop.zailushang.spring.boot.framework.RefreshableScope;
+import shop.zailushang.spring.boot.framework.ScriptEngineCreator;
 
 import javax.script.ScriptContext;
-import javax.script.ScriptEngine;
 import javax.script.ScriptEngineManager;
-import java.util.function.Function;
 
 // 提前初始化的资源配置
 @Configuration
 public class EarlySourceRegistrar {
     // 自定义可刷新作用域对象：refreshableScope
     @Bean("refreshableScope")
-    public static RefreshableScope refreshableScope() {
-        return new RefreshableScope();
+    public static RefreshableScope refreshableScope(DefaultListableBeanFactory defaultListableBeanFactory) {
+        return new RefreshableScope(defaultListableBeanFactory);
     }
 
     // 配置使用自定义作用域对象
@@ -36,9 +36,9 @@ public class EarlySourceRegistrar {
     }
 
     // groovy 脚本引擎
-    @Bean("groovyGetter")
+    @Bean("groovyCreator")
     @DependsOn("inheritableThreadLocal")
-    public static Function<ClassLoader, ScriptEngine> scriptEngineGetter(ApplicationContext applicationContext, @Qualifier("inheritableThreadLocal") InheritableThreadLocal<Object> inheritableThreadLocal) {
+    public static ScriptEngineCreator scriptEngineCreator(ApplicationContext applicationContext, @Qualifier("inheritableThreadLocal") InheritableThreadLocal<Object> inheritableThreadLocal) {
         return classLoader -> {
             var scriptEngineManager = new ScriptEngineManager(classLoader);
             var groovy = scriptEngineManager.getEngineByName("groovy");
