@@ -1,5 +1,6 @@
 package shop.zailushang.spring.boot.framework;
 
+import groovy.lang.GroovyClassLoader;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.FactoryBean;
 import org.springframework.lang.NonNull;
@@ -29,7 +30,7 @@ public class SAMProxyFactoryBean<T, R> implements FactoryBean<SAM<T, R>> {
     @SuppressWarnings("unchecked")
     private SAM<T, R> createProxy() {
         return (SAM<T, R>) Proxy.newProxyInstance(
-                SAM.class.getClassLoader(),
+                new GroovyClassLoader(),// 使用自定义 ClassLoader，用完即抛，防止内存泄露
                 new Class[]{SAM.class},
                 (proxy, method, args) -> method.invoke(target, args));
     }
