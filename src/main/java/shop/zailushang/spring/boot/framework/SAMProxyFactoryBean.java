@@ -32,6 +32,8 @@ public class SAMProxyFactoryBean<T, R> implements FactoryBean<SAM<T, R>> {
         return (SAM<T, R>) Proxy.newProxyInstance(
                 new GroovyClassLoader(),// 使用自定义 ClassLoader，用完即抛，防止内存泄露
                 new Class[]{SAM.class},
+                // 这里如果不存在额外的逻辑的话，生成 Proxy 实属多余操作
+                // 这里创建代理，实际是为了后续可能发生的变化做预留
                 (proxy, method, args) -> method.invoke(target, args));
     }
 

@@ -1,13 +1,11 @@
 package shop.zailushang.spring.boot.pubsub.event;
 
-import lombok.Getter;
 import org.springframework.context.ApplicationEvent;
 import shop.zailushang.spring.boot.model.RefreshBeanModel;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-@Getter
 public class RefreshBeanEvent extends ApplicationEvent {
 
     public enum EventType {
