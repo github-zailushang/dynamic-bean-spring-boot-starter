@@ -14,9 +14,9 @@ import shop.zailushang.spring.boot.service.RefreshBeanService;
 public record RefreshBeanController(RefreshBeanService refreshBeanService, ApplicationContext applicationContext) {
     @PostMapping
     public Object createRefreshBean(@RequestBody RefreshBeanModel refreshBeanModel) {
-        Assert.isTrue(refreshBeanModel.beanName(), Assert::strNotBlank, () -> new NullPointerException("beanName can't be empty"));
-        Assert.isTrue(refreshBeanModel.lambdaScript(), Assert::strNotBlank, () -> new NullPointerException("lambdaScript can't be empty"));
-        Assert.isTrue(refreshBeanModel.description(), Assert::strNotBlank, () -> new NullPointerException("description can't be empty"));
+        Assert.isTrue(refreshBeanModel.beanName(), Assert::strNotBlank, () -> new IllegalArgumentException("beanName can't be empty"));
+        Assert.isTrue(refreshBeanModel.lambdaScript(), Assert::strNotBlank, () -> new IllegalArgumentException("lambdaScript can't be empty"));
+        Assert.isTrue(refreshBeanModel.description(), Assert::strNotBlank, () -> new IllegalArgumentException("description can't be empty"));
         return refreshBeanService.insert(refreshBeanModel);
     }
 
@@ -27,9 +27,12 @@ public record RefreshBeanController(RefreshBeanService refreshBeanService, Appli
 
     @PutMapping
     public Object updateRefreshBean(@RequestBody RefreshBeanModel refreshBeanModel) {
-        Assert.isTrue(refreshBeanModel,
-                rbm -> Assert.strNotBlank(rbm.beanName()) || Assert.strNotBlank(rbm.lambdaScript()) || Assert.strNotBlank(rbm.description()),
-                () -> new NullPointerException("beanName,lambdaScript,description can't be empty together"));
+        Assert.isTrue(refreshBeanModel.beanName(), Assert::strNotBlank, () -> new IllegalArgumentException("beanName can't be empty"));
+        Assert.isTrue(
+                refreshBeanModel,
+                rbm -> Assert.strNotBlank(rbm.lambdaScript()) || Assert.strNotBlank(rbm.description()),
+                () -> new IllegalArgumentException("lambdaScript, description can't be empty together")
+        );
         return refreshBeanService.update(refreshBeanModel);
     }
 

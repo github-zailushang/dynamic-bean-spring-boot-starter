@@ -77,7 +77,7 @@ public class RefreshableBeanDefinitionResolver {
         log.debug("Starting to access the early datasource.");
         var url = environment.getProperty("spring.datasource.url");
         var username = environment.getProperty("spring.datasource.username");
-        var password = environment.getProperty("spring.datasource.password", "");
+        var password = environment.getProperty("spring.datasource.password");
         var dataSource = new DriverManagerDataSource(url, username, password);
         return new JdbcTemplate(dataSource);
     }

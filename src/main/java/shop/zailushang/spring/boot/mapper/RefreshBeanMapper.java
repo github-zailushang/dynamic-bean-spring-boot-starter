@@ -6,7 +6,6 @@ import shop.zailushang.spring.boot.model.RefreshBeanModel;
 import java.util.List;
 import java.util.Optional;
 
-@Mapper
 public interface RefreshBeanMapper {
     @ConstructorArgs({
             @Arg(column = "id", javaType = Long.class),
