@@ -8,6 +8,7 @@ import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.lang.NonNull;
 
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 // 自定义域对象，存储 RefreshAble Bean
@@ -39,15 +40,15 @@ public class RefreshableScope implements Scope {
     @Override
     @SuppressWarnings("NullableProblems")
     public Object remove(@NonNull String name) {
-        // 从未调用过 getBean 方法，直接删除时
-        if (!factoryBeanCache.containsKey(name)) {
-            defaultListableBeanFactory.removeBeanDefinition(name);
+        return factoryBeanCache.compute(name, (k, v) -> {
+            Optional.ofNullable(v).ifPresentOrElse(
+                    // 调用过 getBean 方法
+                    v0 -> destructionCallbackCache.remove(k).run(),
+                    // 从未调用过 getBean 方法
+                    () -> defaultListableBeanFactory.removeBeanDefinition(k)
+            );
             return null;
-        }
-        // 调用过 getBean 方法
-        factoryBeanCache.remove(name);
-        destructionCallbackCache.remove(name).run();
-        return null;
+        });
     }
 
     public void registerDestructionCallback(@NonNull String name, @NonNull Runnable callback) {
