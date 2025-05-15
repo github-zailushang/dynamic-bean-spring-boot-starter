@@ -3,7 +3,6 @@ package shop.zailushang.spring.boot.service.impl;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import shop.zailushang.spring.boot.model.RefreshBeanModel;
@@ -22,15 +21,16 @@ public record RefreshBeanServiceRedisImpl(@Qualifier("stringRedisTemplate") Redi
                                           ApplicationEventPublisher applicationEventPublisher) implements RefreshBeanService {
     @Override
     public List<RefreshBeanModel> selectAll() {
-        HashOperations<String, String, String> hashOperations = redisTemplate.opsForHash();
-        var jsonStrList = hashOperations.entries(RedisConst.REFRESH_BEAN_KEY).values();
+        var jsonStrList = redisTemplate.<String, String>opsForHash()
+                .entries(RedisConst.REFRESH_BEAN_KEY)
+                .values();
         return parseList(jsonStrList);
     }
 
     @Override
     public int insert(RefreshBeanModel refreshBeanModel) {
         var beanName = refreshBeanModel.beanName();
-        HashOperations<String, String, String> hashOperations = redisTemplate.opsForHash();
+        var hashOperations = redisTemplate.<String, String>opsForHash();
         Assert.isFalse(RedisConst.REFRESH_BEAN_KEY, beanName, hashOperations::hasKey, () -> new IllegalArgumentException("model already exists"));
         hashOperations.put(RedisConst.REFRESH_BEAN_KEY, beanName, refreshBeanModel.toJson());
         refresh(RefreshBeanEvent.addWith(refreshBeanModel));
@@ -40,7 +40,7 @@ public record RefreshBeanServiceRedisImpl(@Qualifier("stringRedisTemplate") Redi
     @Override
     public int update(RefreshBeanModel refreshBeanModel) {
         var beanName = refreshBeanModel.beanName();
-        HashOperations<String, String, String> hashOperations = redisTemplate.opsForHash();
+        var hashOperations = redisTemplate.<String, String>opsForHash();
         Assert.isTrue(RedisConst.REFRESH_BEAN_KEY, beanName, hashOperations::hasKey, () -> new NoSuchElementException("model not exists"));
         var beforeModel = RefreshBeanModel.parse(hashOperations.get(RedisConst.REFRESH_BEAN_KEY, beanName));
         hashOperations.put(RedisConst.REFRESH_BEAN_KEY, beanName, refreshBeanModel.toJson());
@@ -52,7 +52,7 @@ public record RefreshBeanServiceRedisImpl(@Qualifier("stringRedisTemplate") Redi
 
     @Override
     public int delete(String beanName) {
-        HashOperations<String, String, String> hashOperations = redisTemplate.opsForHash();
+        var hashOperations = redisTemplate.<String, String>opsForHash();
         Assert.isTrue(RedisConst.REFRESH_BEAN_KEY, beanName, hashOperations::hasKey, () -> new NoSuchElementException("model not exists"));
         hashOperations.delete(RedisConst.REFRESH_BEAN_KEY, beanName);
         refresh(RefreshBeanEvent.deleteWith(RefreshBeanModel.withBeanName(beanName)));
