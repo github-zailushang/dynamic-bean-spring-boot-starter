@@ -1,7 +1,0 @@
-HSET "$_____refresh_bean_____$" "runnable-task" '{"id":"","beanName":"runnable-task","lambdaScript":"return { param -> println \"Runnable running ...\" } as shop.zailushang.spring.boot.framework.SAM","description":"任务型接口示例：无参无返回值"}'
-  "consumer-task" '{"id":"","beanName":"consumer-task","lambdaScript":"return { param -> println \"Hello $param\" } as shop.zailushang.spring.boot.framework.SAM","description":"消费型接口示例：单参无返回值"}'
-  "supplier-task" '{"id":"","beanName":"supplier-task","lambdaScript":"return { param -> \"zailushang\"} as shop.zailushang.spring.boot.framework.SAM","description":"供给型接口示例：无参带返回值"}'
-  "function-task" '{"id":"","beanName":"function-task","lambdaScript":"return { param -> param.replace(\"PHP\",\"Java\") } as shop.zailushang.spring.boot.framework.SAM","description":"函数型接口示例：单参带返回值（任意）"}'
-  "predicate-task" '{"id":"","beanName":"predicate-task","lambdaScript":"return { param -> \"gay\" == param } as shop.zailushang.spring.boot.framework.SAM","description":"断言型接口示例：单参带返回值（Boolean）"}'
-  "run-4-act" '{"id":"","beanName":"run-4-act","lambdaScript":"import javax.sql.DataSource;return { param -> println act.getBean(DataSource.class) } as shop.zailushang.spring.boot.framework.SAM","description":"使用内置对象 act 查找依赖示例"}'
-  "run-4-itl" '{"id":"","beanName":"run-4-itl","lambdaScript":"return { param -> println \"itl.get() = ${itl.get()}, in groovy.\"; itl.remove(); } as shop.zailushang.spring.boot.framework.SAM","description":"使用内置对象 itl 获取线程变量示例"}'

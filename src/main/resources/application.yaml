@@ -14,15 +14,18 @@ spring:
       minimum-idle: 5
       maximum-pool-size: 10
       validation-timeout: 5000
-  data:
-    redis:
-      host: 192.168.33.128
-      port: 6379
-
+  redis:
+    redisson:
+      config: |
+        singleServerConfig:
+          address: "redis://192.168.33.128:6379"
+        codec: !<org.redisson.client.codec.StringCodec> {}
 logging:
   level:
     org.mybatis: info
-
+    org.redisson: info
+    org.redisson.connection: info
+    org.redisson.client: info
 canal:
   server-host: 192.168.33.128
   server-port: 11111
@@ -32,4 +35,4 @@ canal:
   subscribe-filter: dynamic_bean.refresh_bean
 
 dynamic-bean:
-  mode: database #database || redis || database-auto
+  mode: redis #database || redis || database-auto

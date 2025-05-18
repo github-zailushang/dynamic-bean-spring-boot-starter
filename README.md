@@ -38,14 +38,22 @@ graph TD
 注册 BeanDefinitionRegistryPostProcessor 代码如下：
 
 ```java
-@Bean
-public static BeanDefinitionRegistryPostProcessor beanDefinitionRegistryPostProcessor(Environment environment, @Qualifier("groovyGetter") Function<ClassLoader, ScriptEngine> scriptEngineGetter, RefreshableScope refreshableScope) {
-    return registry -> {
-        log.info("starting DatabaseMode BeanDefinitionRegistry.");
-        var beanDefinitionHolders = RefreshableBeanDefinitionResolver.resolveBeanDefinitionFromDatabase(environment, scriptEngineGetter, refreshableScope);
-        beanDefinitionHolders.forEach(beanDefinitionHolder -> registry.registerBeanDefinition(beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition()));
-    };
-}
+  // 数据库模式下资源配置
+    @Slf4j
+    @Configuration
+    @AutoConfigureAfter(EarlySourceRegistrar.class)
+    @ConditionalOnProperty(name = "dynamic-bean.mode", havingValue = "database")
+    static class DatabaseModeSourceRegistrar {
+        // BeanDefinition 注册器
+        @Bean
+        public static BeanDefinitionRegistryPostProcessor beanDefinitionRegistryPostProcessor(Environment environment, @Qualifier("groovyCreator") ScriptEngineCreator scriptEngineCreator, RefreshableScope refreshableScope) {
+            return registry -> {
+                log.info("starting DatabaseMode BeanDefinitionRegistry.");
+                var beanDefinitionHolders = RefreshableBeanDefinitionResolver.resolveBeanDefinitionFromDatabase(environment, scriptEngineCreator, refreshableScope);
+                beanDefinitionHolders.forEach(beanDefinitionHolder -> registry.registerBeanDefinition(beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition()));
+            };
+        }
+    }
 ```
 
 解析配置信息生成 BeanDefinition 代码如下：
@@ -54,7 +62,7 @@ public static BeanDefinitionRegistryPostProcessor beanDefinitionRegistryPostProc
 @Slf4j
 public class RefreshableBeanDefinitionResolver {
     // 从数据库中获取所有需要动态注册的Bean定义
-    public static Set<BeanDefinitionHolder> resolveBeanDefinitionFromDatabase(Environment environment, Function<ClassLoader, ScriptEngine> scriptEngineGetter, RefreshableScope refreshableScope) {
+    public static Set<BeanDefinitionHolder> resolveBeanDefinitionFromDatabase(Environment environment, ScriptEngineCreator scriptEngineCreator, RefreshableScope refreshableScope) {
         var jdbcTemplate = resolverEarlyJdbcTemplate(environment);
         var refreshBeanList = jdbcTemplate.query(
                 "select * from refresh_bean",
@@ -65,38 +73,38 @@ public class RefreshableBeanDefinitionResolver {
                         rs.getString("description")
                 ));
         return refreshBeanList.stream()
-                .map(refreshBeanModel -> resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngineGetter, refreshableScope))
-                .peek(beanDefinitionHolder -> log.debug("register beanDefinition, {} => {}", beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition()))
+                .map(refreshBeanModel -> resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngineCreator, refreshableScope))
+                .peek(beanDefinitionHolder -> log.debug("register beanDefinition from database, {} => {}", beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition()))
                 .collect(Collectors.toSet());
     }
 
     // 从Redis中获取所有需要动态注册的Bean定义
-    public static Set<BeanDefinitionHolder> resolveBeanDefinitionFromRedis(Environment environment, Function<ClassLoader, ScriptEngine> scriptEngineGetter, RefreshableScope refreshableScope) {
-        try (var redisClient = resolverEarlyRedisClient(environment); var connect = redisClient.connect()) {
-            return connect.sync()
-                    .hgetall(RedisConst.REFRESH_BEAN_KEY)
+    public static Set<BeanDefinitionHolder> resolveBeanDefinitionFromRedis(Environment environment, ScriptEngineCreator scriptEngineCreator, RefreshableScope refreshableScope) {
+        var redissonClient = resolverEarlyRedissonClient(environment);
+        var rMapCache = redissonClient.<String, String>getMapCache(RedisConst.REFRESH_BEAN_KEY);
+        try {
+            return rMapCache
                     .values()
                     .stream()
                     .map(RefreshBeanModel::parse)
-                    .map(refreshBeanModel -> resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngineGetter, refreshableScope))
-                    .peek(beanDefinitionHolder -> log.debug("register beanDefinition, {} => {}", beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition()))
+                    .map(refreshBeanModel -> resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngineCreator, refreshableScope))
+                    .peek(beanDefinitionHolder -> log.debug("register beanDefinition from redis, {} => {}", beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition()))
                     .collect(Collectors.toSet());
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+        } finally {
+            redissonClient.shutdown();
         }
     }
 
     // 根据 RefreshBeanModel 创建 BeanDefinitionHolder
-    public static BeanDefinitionHolder resolveBeanDefinitionFromModel(RefreshBeanModel refreshBeanModel, Function<ClassLoader, ScriptEngine> scriptEngineGetter, RefreshableScope refreshableScope) {
+    public static BeanDefinitionHolder resolveBeanDefinitionFromModel(RefreshBeanModel refreshBeanModel, ScriptEngineCreator scriptEngineCreator, RefreshableScope refreshableScope) {
         var lambdaScript = refreshBeanModel.lambdaScript();
         var beanName = refreshBeanModel.beanName();
         // 每个动态类使用唯一的 ClassLoader 加载，用完即抛，防止内存泄露
         try (var classLoader = new GroovyClassLoader()) {
-            var scriptEngine = scriptEngineGetter.apply(classLoader);
+            var scriptEngine = scriptEngineCreator.createScriptEngine(classLoader);
             var target = scriptEngine.eval(lambdaScript);
-            // 注册Bean定义
-            var beanDefinition = BeanDefinitionBuilder
-                    .genericBeanDefinition(SAMProxyFactoryBean.class)
+            // 生成 Bean定义
+            var beanDefinition = BeanDefinitionBuilder.genericBeanDefinition(SAMProxyFactoryBean.class)
                     .addConstructorArgValue(target)
                     .setScope(refreshableScope.name())
                     .getBeanDefinition();
@@ -111,24 +119,20 @@ public class RefreshableBeanDefinitionResolver {
         log.debug("Starting to access the early datasource.");
         var url = environment.getProperty("spring.datasource.url");
         var username = environment.getProperty("spring.datasource.username");
-        var password = environment.getProperty("spring.datasource.password", "");
+        var password = environment.getProperty("spring.datasource.password");
         var dataSource = new DriverManagerDataSource(url, username, password);
         return new JdbcTemplate(dataSource);
     }
 
-    // 获取 Early RedisClient
-    private static RedisClient resolverEarlyRedisClient(Environment environment) {
+    // 获取 Early RedissonClient
+    private static RedissonClient resolverEarlyRedissonClient(Environment environment) {
         log.debug("Starting to access the early redis.");
-        var host = environment.getProperty("spring.data.redis.host");
-        var port = environment.getProperty("spring.data.redis.port", Integer.class);
-        var password = environment.getProperty("spring.data.redis.password");
-        var builder = RedisURI.builder()
-                .withHost(host)
-                .withPort(port)
-                .withDatabase(0);
-        if (Assert.strNotBlank(password)) builder.withPassword((CharSequence) password);
-        var redisUri = builder.build();
-        return RedisClient.create(redisUri);
+        try {
+            var config = Config.fromYAML(environment.getProperty("spring.redis.redisson.config"));
+            return Redisson.create(config);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 }
 ```
@@ -138,9 +142,13 @@ public class RefreshableBeanDefinitionResolver {
 
 ```java
 // 自定义域对象，存储 RefreshAble Bean
+@RequiredArgsConstructor
 public class RefreshableScope implements Scope {
 
+    private final DefaultListableBeanFactory defaultListableBeanFactory;
+
     private final Map<String, FactoryBean<SAM<?, ?>>> factoryBeanCache = new ConcurrentHashMap<>();
+    private final Map<String, Runnable> destructionCallbackCache = new ConcurrentHashMap<>();
 
     public String name() {
         return "REFRESHABLE_SCOPE";
@@ -150,13 +158,43 @@ public class RefreshableScope implements Scope {
     @Override
     @SuppressWarnings("unchecked")
     public FactoryBean<SAM<?, ?>> get(@NonNull String name, @NonNull ObjectFactory<?> objectFactory) {
-        return factoryBeanCache.computeIfAbsent(name, key -> (FactoryBean<SAM<?, ?>>) objectFactory.getObject());
+        factoryBeanCache.computeIfAbsent(name, key -> {
+            // 创建工厂Bean时，同步生成销毁回调
+            registerDestructionCallback(name, () -> defaultListableBeanFactory.removeBeanDefinition(name));
+            // 创建并缓存工厂Bean
+            return (FactoryBean<SAM<?, ?>>) objectFactory.getObject();
+        });
+        return factoryBeanCache.get(name);
+    }
+
+    @Override
+    @SuppressWarnings("NullableProblems")
+    public Object remove(@NonNull String name) {
+        return factoryBeanCache.compute(name, (k, v) -> {
+            Optional.ofNullable(v).ifPresentOrElse(
+                    // 调用过 getBean 方法
+                    v0 -> destructionCallbackCache.remove(k).run(),
+                    // 从未调用过 getBean 方法
+                    () -> defaultListableBeanFactory.removeBeanDefinition(k)
+            );
+            return null;
+        });
+    }
+
+    public void registerDestructionCallback(@NonNull String name, @NonNull Runnable callback) {
+        destructionCallbackCache.putIfAbsent(name, callback);
     }
 
     @NonNull
     @Override
-    public Object remove(@NonNull String name) {
-        return factoryBeanCache.remove(name);
+    public Object resolveContextualObject(@NonNull String key) {
+        return "";
+    }
+
+    @NonNull
+    @Override
+    public String getConversationId() {
+        return "";
     }
 }
 ```
@@ -171,7 +209,7 @@ public class RefreshableScope implements Scope {
 
 - database：提供一套增删改数据库配置的接口，在操作 mysql 配置表的同时，发布事件异步处理 Bean 实例以及 BeanDefinition 的增删改。
 
-- redis：提供一套增删改数据库配置的接口，在操作 redis hset 的同时，发布事件异步处理 Bean 实例以及 BeanDefinition 的增删改。
+- redis：提供一套通过增删改 reids 配置的接口（通过代理客户端 RedissonClient 操作），在操作 redis hash 时，会触发对应的监听器（EntryCreatedListener、EntryUpdatedListener、EntryRemovedListener），在监听器中发布对应事件异步处理 Bean 实例以及 BeanDefinition 的增删改。
 
 - database-auto：使用 canal 监听 mysql 配置表的增删改，解析 mysql binlog 增量日志，修改表数据时，通过长轮询自动触发 Bean 实例及 BeanDefinition 后续操作，无需手动调用接口。
 - redis-auto：暂未提供。【画外音，redis pubsub（ keyspace notifications）：关某自随兄长征战，许多年来，未尝落后。今日逢大敌，军师却不委用，此是何意？】
@@ -238,79 +276,100 @@ redis mode 接口代码如下：
 ```java
 @Service
 @ConditionalOnProperty(name = "dynamic-bean.mode", havingValue = "redis")
-public class RefreshBeanServiceRedisImpl implements RefreshBeanService {
-    private final RedisTemplate<String, String> redisTemplate;
-    private final ApplicationEventPublisher applicationEventPublisher;
-
-    public RefreshBeanServiceRedisImpl(@Qualifier("stringRedisTemplate") RedisTemplate<String, String> redisTemplate, ApplicationEventPublisher applicationEventPublisher) {
-        this.redisTemplate = redisTemplate;
-        this.applicationEventPublisher = applicationEventPublisher;
-    }
-
+public record RefreshBeanServiceRedisImpl(RedissonClient redissonClient) implements RefreshBeanService {
     @Override
     public List<RefreshBeanModel> selectAll() {
-        HashOperations<String, String, String> hashOperations = redisTemplate.opsForHash();
-        var jsonStrList = hashOperations.entries(RedisConst.REFRESH_BEAN_KEY).values();
+        var jsonStrList = redissonClient.<String, String>getMapCache(RedisConst.REFRESH_BEAN_KEY)
+                .values();
         return parseList(jsonStrList);
     }
 
     @Override
-    @Transactional
     public int insert(RefreshBeanModel refreshBeanModel) {
         var beanName = refreshBeanModel.beanName();
-        HashOperations<String, String, String> hashOperations = redisTemplate.opsForHash();
-        Assert.isFalse(RedisConst.REFRESH_BEAN_KEY, beanName, hashOperations::hasKey, () -> new IllegalArgumentException("model already exists"));
-        hashOperations.put(RedisConst.REFRESH_BEAN_KEY, beanName, refreshBeanModel.toJson());
-        refresh(RefreshBeanEvent.addWith(refreshBeanModel));
+        var rMapCache = redissonClient.<String, String>getMapCache(RedisConst.REFRESH_BEAN_KEY);
+        Assert.isFalse(beanName, rMapCache::containsKey, () -> new IllegalArgumentException("model already exists"));
+        rMapCache.fastPut(beanName, refreshBeanModel.toJson());
         return 1;
     }
 
     @Override
-    @Transactional
     public int update(RefreshBeanModel refreshBeanModel) {
         var beanName = refreshBeanModel.beanName();
-        HashOperations<String, String, String> hashOperations = redisTemplate.opsForHash();
-        Assert.isTrue(RedisConst.REFRESH_BEAN_KEY, beanName, hashOperations::hasKey, () -> new NoSuchElementException("model not exists"));
-        var beforeModel = RefreshBeanModel.parse(hashOperations.get(RedisConst.REFRESH_BEAN_KEY, beanName));
-        hashOperations.put(RedisConst.REFRESH_BEAN_KEY, beanName, refreshBeanModel.toJson());
-        refresh(RefreshBeanEvent.updateWith(beforeModel, refreshBeanModel));
+        var rMapCache = redissonClient.<String, String>getMapCache(RedisConst.REFRESH_BEAN_KEY);
+        Assert.isTrue(beanName, rMapCache::containsKey, () -> new NoSuchElementException("model not exists"));
+        rMapCache.fastPut(beanName, refreshBeanModel.toJson());
         return 1;
     }
 
     @Override
-    @Transactional
     public int delete(String beanName) {
-        HashOperations<String, String, String> hashOperations = redisTemplate.opsForHash();
-        Assert.isTrue(RedisConst.REFRESH_BEAN_KEY, beanName, hashOperations::hasKey, () -> new NoSuchElementException("model not exists"));
-        hashOperations.delete(RedisConst.REFRESH_BEAN_KEY, beanName);
-        refresh(RefreshBeanEvent.deleteWith(RefreshBeanModel.withBeanName(beanName)));
+        var rMapCache = redissonClient.<String, String>getMapCache(RedisConst.REFRESH_BEAN_KEY);
+        Assert.isTrue(beanName, rMapCache::containsKey, () -> new NoSuchElementException("model not exists"));
+        rMapCache.fastRemove(beanName);
         return 1;
     }
 
     private List<RefreshBeanModel> parseList(Collection<String> jsonList) {
         return jsonList.stream().map(RefreshBeanModel::parse).toList();
     }
-
-    private void refresh(RefreshBeanEvent refreshBeanEvent) {
-        applicationEventPublisher.publishEvent(refreshBeanEvent);
-    }
 }
 ```
 
-spring 事件监听器配置，如下：
-
+redisson 监听器相关配置
 ```java
+@Bean
+public EntryCreatedListener<String, String> entryCreatedListener() {
+    return event -> {
+        var key = event.getKey();
+        refresh(RefreshBeanEvent.addWith(RefreshBeanModel.parse(event.getValue())));
+        log.info("redis listener create callback ==> {}", key);
+    };
+}
+
+@Bean
+public EntryUpdatedListener<String, String> entryUpdatedListener() {
+    return event -> {
+        var key = event.getKey();
+        var oldValue = event.getOldValue();
+        var value = event.getValue();
+        var beforeModel = RefreshBeanModel.parse(oldValue);
+        var afterModel = RefreshBeanModel.parse(value);
+        // 修改了 lambdaScript 时，才触发后续的刷新操作
+        if (beforeModel.diff(afterModel)) refresh(RefreshBeanEvent.updateWith(beforeModel, afterModel));
+        log.info("redis listener update callback ==> {}", key);
+    };
+}
+
+@Bean
+public EntryRemovedListener<String, String> entryRemovedListener() {
+    return event -> {
+        var key = event.getKey();
+        refresh(RefreshBeanEvent.deleteWith(RefreshBeanModel.withBeanName(key)));
+        log.info("redis listener delete callback ==> {}", key);
+    };
+}
+
+// 注册监听器
 @Async
-@TransactionalEventListener(RefreshBeanEvent.class)
-public void eventListener(RefreshBeanEvent refreshBeanEvent) {
-    new DefaultEventProcessor(defaultListableBeanFactory, refreshableScope, scriptEngineGetter)
-            .processEvent(refreshBeanEvent);
+@EventListener(ApplicationReadyEvent.class)
+public void eventListener() {
+    var rMapCache = redissonClient.<String, String>getMapCache(RedisConst.REFRESH_BEAN_KEY);
+    // 注册监听器
+    mapEntryListeners.forEach(rMapCache::addListener);
 }
 ```
 
 事件处理器，如下：
 
 ```java
+@Async
+@TransactionalEventListener(RefreshBeanEvent.class)
+public void eventListener(RefreshBeanEvent refreshBeanEvent) {
+    new DefaultEventProcessor(defaultListableBeanFactory, refreshableScope, scriptEngineCreator)
+            .processEvent(refreshBeanEvent);
+}
+
 @Slf4j
 @RequiredArgsConstructor
 public class DefaultEventProcessor implements EventProcessor {
@@ -318,7 +377,7 @@ public class DefaultEventProcessor implements EventProcessor {
 
     private final RefreshableScope refreshableScope;
 
-    private final Function<ClassLoader, ScriptEngine> scriptEngineGetter;
+    private final ScriptEngineCreator scriptEngineCreator;
 
     @Override
     public void processEvent(RefreshBeanEvent refreshBeanEvent) {
@@ -341,20 +400,21 @@ public class DefaultEventProcessor implements EventProcessor {
             // 存在时，抛出 IllegalArgumentException 异常
             Assert.isTrue(beanDefinition, Assert::isNull, () -> new IllegalArgumentException("beanDefinition already exists"));
         } catch (NoSuchBeanDefinitionException e) {
-            // 不存在时，注册 BeanDefinition
-            var beanDefinitionHolder = RefreshableBeanDefinitionResolver.resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngineGetter, refreshableScope);
-            defaultListableBeanFactory.registerBeanDefinition(beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition());
-            log.info("add beanDefinition: {}", beanDefinitionHolder.getBeanName());
+            // 当 BeanDefinition 不存在时
+            var beanDefinitionHolder = RefreshableBeanDefinitionResolver.resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngineCreator, refreshableScope);
+            var beanName = beanDefinitionHolder.getBeanName();
+            var beanDefinition = beanDefinitionHolder.getBeanDefinition();
+            // 注册 BeanDefinition
+            defaultListableBeanFactory.registerBeanDefinition(beanName, beanDefinition);
+            log.info("add beanDefinition: {}", beanName);
         }
     }
 
     // 删除时，删除 Bean实例, 并删除 BeanDefinition。
     private void del(RefreshBeanModel refreshBeanModel) {
         var beanName = refreshBeanModel.beanName();
-        var beanDefinition = defaultListableBeanFactory.getBeanDefinition(beanName);
-        Assert.isTrue(beanDefinition, Assert::isNotNull, () -> new NoSuchElementException("beanDefinition not found"));
-        refreshableScope.remove(refreshBeanModel.beanName());
-        defaultListableBeanFactory.removeBeanDefinition(refreshBeanModel.beanName());
+        // 移除 Bean 实例 自动触发销毁回调
+        refreshableScope.remove(beanName);
         log.info("del beanDefinition: {}", beanName);
     }
 }
@@ -483,16 +543,18 @@ spring:
       minimum-idle: 5
       maximum-pool-size: 10
       validation-timeout: 5000
-  data:
-    redis:
-      host: 192.168.33.128
-      port: 6379
-
+  redis:
+    redisson:
+      config: |
+        singleServerConfig:
+          address: "redis://192.168.33.128:6379"
+        codec: !<org.redisson.client.codec.StringCodec> {}
 logging:
   level:
     org.mybatis: info
-
-# 需自行提供 canal环境,没有可以不用配置，选用 database 或者 redis 模式
+    org.redisson: info
+    org.redisson.connection: info
+    org.redisson.client: info
 canal:
   server-host: 192.168.33.128
   server-port: 11111
@@ -502,20 +564,19 @@ canal:
   subscribe-filter: dynamic_bean.refresh_bean
 
 dynamic-bean:
-  mode: database #database || redis || database-auto
+  mode: redis #database || redis || database-auto
 ```
 
-先行执行，项目中提供的 schema 下的，dynamic_bean.redis 和 dynamic_bean.sql
-
+<font color="red">Tip: 使用 database 或 database-auto 模式时，先行执行项目中 schema 下的  dynamic_bean.sql 初始化测试数据。</font>
 ###### mysql 模式配置信息:
 
 ```sql
 CREATE TABLE `refresh_bean` (
-                                `id` int NOT NULL AUTO_INCREMENT COMMENT '主键',
-                                `bean_name` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'bean在内存中名字',
-                                `lambda_script` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'SAM类源码',
-                                `description` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '描述信息',
-                                PRIMARY KEY (`id`)
+  `id` int NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `bean_name` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'bean在内存中名字',
+  `lambda_script` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'SAM类源码',
+  `description` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '描述信息',
+  PRIMARY KEY (`id`)
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 INSERT INTO `refresh_bean` VALUES (1, 'runnable-task', 'return { param -> println \"Runnable running ...\" } as shop.zailushang.spring.boot.framework.SAM', '任务型接口示例：无参无返回值');
@@ -526,27 +587,98 @@ INSERT INTO `refresh_bean` VALUES (5, 'predicate-task', 'return { param -> \"gay
 INSERT INTO `refresh_bean` VALUES (6, 'run-4-act', 'import javax.sql.DataSource;return { param -> println act.getBean(DataSource.class) } as shop.zailushang.spring.boot.framework.SAM', '使用内置对象 act 查找依赖示例');
 INSERT INTO `refresh_bean` VALUES (7, 'run-4-itl', 'return { param -> println \"itl.get() = ${itl.get()}, in groovy.\"; itl.remove(); } as shop.zailushang.spring.boot.framework.SAM', '使用内置对象 itl 获取线程变量示例');
 ```
-
+<font color="red">Tip:使用 redis 模式时，已不再支持直接通过原生 redis 命令（hset）写入数据，（2025年5月18日 修改实现）必须通过 redissonClient 的 rmapCache 写入数据，redisson 通过自定义 lua 脚本，记录额外信息，代理客户端操作，实现了字段级的 hash 数据监听，在写入业务数据的同时，会拼接额外的二进制数据，所以，直接通过 het 写入的原始数据，没有额外的二进制信息，无法通过解析，但已经通过 redisson 写入的数据（拼接了额外二进制数据的），通过 het 迁移是没问题的，另外，不同的 codec（序列化器），拼接的二进制文件亦是不同，项目中已固定使用 StringCodec。</font>
 ###### redis 模式配置信息
 
-```redis
-HSET "$_____refresh_bean_____$"
-"runnable-task" '{"id":"","beanName":"runnable-task","lambdaScript":"return { param -> println \"Runnable running ...\" } as shop.zailushang.spring.boot.framework.SAM","description":"任务型接口示例：无参无返回值"}'
-  "consumer-task" '{"id":"","beanName":"consumer-task","lambdaScript":"return { param -> println \"Hello $param\" } as shop.zailushang.spring.boot.framework.SAM","description":"消费型接口示例：单参无返回值"}'
-  "supplier-task" '{"id":"","beanName":"supplier-task","lambdaScript":"return { param -> \"zailushang\"} as shop.zailushang.spring.boot.framework.SAM","description":"供给型接口示例：无参带返回值"}'
-  "function-task" '{"id":"","beanName":"function-task","lambdaScript":"return { param -> param.replace(\"PHP\",\"Java\") } as shop.zailushang.spring.boot.framework.SAM","description":"函数型接口示例：单参带返回值（任意）"}'
-  "predicate-task" '{"id":"","beanName":"predicate-task","lambdaScript":"return { param -> \"gay\" == param } as shop.zailushang.spring.boot.framework.SAM","description":"断言型接口示例：单参带返回值（Boolean）"}'
-  "run-4-act" '{"id":"","beanName":"run-4-act","lambdaScript":"import javax.sql.DataSource;return { param -> println act.getBean(DataSource.class) } as shop.zailushang.spring.boot.framework.SAM","description":"使用内置对象 act 查找依赖示例"}'
-  "run-4-itl" '{"id":"","beanName":"run-4-itl","lambdaScript":"return { param -> println \"itl.get() = ${itl.get()}, in groovy.\"; itl.remove(); } as shop.zailushang.spring.boot.framework.SAM","description":"使用内置对象 itl 获取线程变量示例"}'
+```json
+[
+  {
+    "id": null,
+    "beanName": "runnable-task",
+    "lambdaScript": "return { param -> println \"Runnable running ...\" } as shop.zailushang.spring.boot.framework.SAM",
+    "description": "任务型接口示例：无参无返回值"
+  },
+  {
+    "id": null,
+    "beanName": "consumer-task",
+    "lambdaScript": "return { param -> println \"Hello $param\" } as shop.zailushang.spring.boot.framework.SAM",
+    "description": "消费型接口示例：单参无返回值"
+  },
+  {
+    "id": null,
+    "beanName": "supplier-task",
+    "lambdaScript": "return { param -> \"zailushang\"} as shop.zailushang.spring.boot.framework.SAM",
+    "description": "供给型接口示例：无参带返回值"
+  },
+  {
+    "id": null,
+    "beanName": "function-task",
+    "lambdaScript": "return { param -> param.replace(\"PHP\",\"Java\") } as shop.zailushang.spring.boot.framework.SAM",
+    "description": "函数型接口示例：单参带返回值（任意）"
+  },
+  {
+    "id": null,
+    "beanName": "predicate-task",
+    "lambdaScript": "return { param -> \"gay\" == param } as shop.zailushang.spring.boot.framework.SAM",
+    "description": "断言型接口示例：单参带返回值（Boolean）"
+  },
+  {
+    "id": null,
+    "beanName": "run-4-act",
+    "lambdaScript": "import javax.sql.DataSource;return { param -> println act.getBean(DataSource.class) } as shop.zailushang.spring.boot.framework.SAM",
+    "description": "使用内置对象 act 查找依赖示例"
+  },
+  {
+    "id": null,
+    "beanName": "run-4-itl",
+    "lambdaScript": "return { param -> println \"itl.get() = ${itl.get()}, in groovy.\"; itl.remove(); } as shop.zailushang.spring.boot.framework.SAM",
+    "description": "使用内置对象 itl 获取线程变量示例"
+  }
+]
 ```
 
-Tip：其中，id 字段不重要，不承载业务，所以，mysql 中简单自增就行，redis 中可以不存。承载实际增删改业务的逻辑主键为 bean_name，要求唯一，且不可修改 bean_name，如想修改 bean_name，正确做法是删除后新增。
+使用 redis 模式时，请先通过以下方法，初始化 redis 测试数据。
+
+```java
+public class RedisTestDataInit {
+    // init redis test data before start application
+    @Test
+    void initRedisData() throws Exception {
+        // address and password
+        var address = "redis://192.168.33.128:6379";
+        // if used password set password here
+        var password = "";
+
+        var url = ClassLoader.getSystemClassLoader()
+                .getResource("dynamic_bean.json");
+        var refreshBeanList = new ObjectMapper().readValue(url, new TypeReference<List<RefreshBeanModel>>() {
+        });
+
+        var config = new Config();
+        // use  string codec
+        config.setCodec(StringCodec.INSTANCE);
+        var singleServerConfig = config.useSingleServer();
+        singleServerConfig.setAddress(address);
+        if (Assert.strNotBlank(password)) singleServerConfig.setPassword(password);
+        var redissonClient = Redisson.create(config);
+        try {
+            var rMapCache = redissonClient.<String, String>getMapCache(RedisConst.REFRESH_BEAN_KEY, StringCodec.INSTANCE);
+            rMapCache.clear();
+            refreshBeanList.stream().forEach(refreshBeanModel -> rMapCache.fastPut(refreshBeanModel.beanName(), refreshBeanModel.toJson()));
+        } finally {
+            redissonClient.shutdown();
+        }
+    }
+}
+```
+
+<font color="red">Tip：其中，id 字段不重要，不承载业务，所以，mysql 中简单自增就行，redis 中可以不存。实际承载增删改业务的逻辑主键为 bean_name，要求唯一，且不可修改 bean_name，如想修改 bean_name，正确做法是删除后新增。</font>
 
 以上 lambda_script 字段中存储的为 Groovy 脚本，格式如下:
 
 ```groovy
 return { param ->
-    ...// 更详细的使用示例见：启动篇
+...// 更详细的使用示例见：启动篇
 } as shop.zailushang.spring.boot.framework.SAM
 ```
 
@@ -560,9 +692,9 @@ public static InheritableThreadLocal<Object> inheritableThreadLocal() {
 }
 
 // groovy 脚本引擎
-@Bean("groovyGetter")
+@Bean("groovyCreator")
 @DependsOn("inheritableThreadLocal")
-public static Function<ClassLoader, ScriptEngine> scriptEngineGetter(ApplicationContext applicationContext, @Qualifier("inheritableThreadLocal") InheritableThreadLocal<Object> inheritableThreadLocal) {
+public static ScriptEngineCreator scriptEngineCreator(ApplicationContext applicationContext, @Qualifier("inheritableThreadLocal") InheritableThreadLocal<Object> inheritableThreadLocal) {
     return classLoader -> {
         var scriptEngineManager = new ScriptEngineManager(classLoader);
         var groovy = scriptEngineManager.getEngineByName("groovy");
@@ -620,30 +752,12 @@ lambdaScript 注册为 BeanDefinition 时的真正实现类：
 ```java
 @RequiredArgsConstructor
 public class SAMProxyFactoryBean<T, R> implements FactoryBean<SAM<T, R>> {
-
     private final SAM<T, R> target;
-    // 缓存代理实例
-    private volatile SAM<T, R> proxy;
-
+	// 2025年5月18日 暂时删除代理逻辑，后续需要再行添加
     @NonNull
     @Override
     public SAM<T, R> getObject() {
-        if (proxy == null) {
-            // FactoryBean 的 this 已在 scope 中缓存，所以这里使用 this 作为锁对象无碍
-            synchronized (this) {
-                if (proxy == null) proxy = createProxy();
-            }
-        }
-        return proxy;
-    }
-
-    // 使用 jdk 动态代理生成代理对象
-    @SuppressWarnings("unchecked")
-    private SAM<T, R> createProxy() {
-        return (SAM<T, R>) Proxy.newProxyInstance(
-                SAM.class.getClassLoader(),
-                new Class[]{SAM.class},
-                (proxy, method, args) -> method.invoke(target, args));
+        return target;
     }
 
     @NonNull
@@ -783,7 +897,7 @@ return { param ->
     // 此处可无缝使用 java 类，不了解 groovy 语法也没关系，这里可以完全当 java 来写
     // 除入参 param 外，此处还额外绑定了上下文级的变量 act（ApplicationContext） 用以获取 spring 内部的任意 bean 对象
     // 变量 itl （InheritableThreadLocal）用以实现线程隔离传参，见测试案例任务id 7
-    def xxx = act.getBean("bean名字", XXX.class) // 根据实际情况选择在上面导包或者使用全限定类名，任务6为依赖查找示例
+	def xxx = act.getBean("bean名字", XXX.class) // 根据实际情况选择在上面导包或者使用全限定类名，任务6为依赖查找示例
     def xxx = itl.get() // 任务7为使用InheritableThreadLocal传参示例，注意使用完在 finally 块中移除，防止内存泄露
 } as SAM
 ```
@@ -813,13 +927,13 @@ return { param ->
 @Component
 public class TestClass {
     @Autowired
-    @Qualifier("bean名字")
-    private Sam<?,?> sam;
+    @Qualifier("bean名字") 
+	private Sam<?,?> sam;
 }
 
 // 建议的用法，通过 ApplicationContext 查找
 public class TestClass {
-    public void xxx(){
+	public void xxx(){
         var bean = ApplicationContext.getBean("bean名字",SAM.class);
         // bean 已经实现了大多数函数式接口 参考任务 1-5 示例
     }

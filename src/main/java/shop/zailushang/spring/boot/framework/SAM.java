@@ -1,8 +1,5 @@
 package shop.zailushang.spring.boot.framework;
 
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.ResponseBody;
-
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -37,7 +34,5 @@ public interface SAM<T, R> extends Runnable, Consumer<T>, Supplier<R>, Function<
         return (boolean) execute(param);
     }
 
-    // 添加Spring MVC 注解，为 Dynamic Controller 做预留
-    @ResponseBody
-    R execute(@RequestBody T param);
+    R execute(T param);
 }

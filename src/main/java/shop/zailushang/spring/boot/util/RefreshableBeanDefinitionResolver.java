@@ -1,9 +1,10 @@
 package shop.zailushang.spring.boot.util;
 
 import groovy.lang.GroovyClassLoader;
-import io.lettuce.core.RedisClient;
-import io.lettuce.core.RedisURI;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.Redisson;
+import org.redisson.api.RedissonClient;
+import org.redisson.config.Config;
 import org.springframework.beans.factory.config.BeanDefinitionHolder;
 import org.springframework.beans.factory.support.BeanDefinitionBuilder;
 import org.springframework.core.env.Environment;
@@ -15,6 +16,7 @@ import shop.zailushang.spring.boot.model.RefreshBeanModel;
 import shop.zailushang.spring.boot.framework.RefreshableScope;
 import shop.zailushang.spring.boot.pubsub.redis.RedisConst;
 
+import java.io.IOException;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -33,23 +35,24 @@ public class RefreshableBeanDefinitionResolver {
                 ));
         return refreshBeanList.stream()
                 .map(refreshBeanModel -> resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngineCreator, refreshableScope))
-                .peek(beanDefinitionHolder -> log.debug("register beanDefinition, {} => {}", beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition()))
+                .peek(beanDefinitionHolder -> log.debug("register beanDefinition from database, {} => {}", beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition()))
                 .collect(Collectors.toSet());
     }
 
     // 从Redis中获取所有需要动态注册的Bean定义
     public static Set<BeanDefinitionHolder> resolveBeanDefinitionFromRedis(Environment environment, ScriptEngineCreator scriptEngineCreator, RefreshableScope refreshableScope) {
-        try (var redisClient = resolverEarlyRedisClient(environment); var connect = redisClient.connect()) {
-            return connect.sync()
-                    .hgetall(RedisConst.REFRESH_BEAN_KEY)
+        var redissonClient = resolverEarlyRedissonClient(environment);
+        var rMapCache = redissonClient.<String, String>getMapCache(RedisConst.REFRESH_BEAN_KEY);
+        try {
+            return rMapCache
                     .values()
                     .stream()
                     .map(RefreshBeanModel::parse)
                     .map(refreshBeanModel -> resolveBeanDefinitionFromModel(refreshBeanModel, scriptEngineCreator, refreshableScope))
-                    .peek(beanDefinitionHolder -> log.debug("register beanDefinition, {} => {}", beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition()))
+                    .peek(beanDefinitionHolder -> log.debug("register beanDefinition from redis, {} => {}", beanDefinitionHolder.getBeanName(), beanDefinitionHolder.getBeanDefinition()))
                     .collect(Collectors.toSet());
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+        } finally {
+            redissonClient.shutdown();
         }
     }
 
@@ -82,18 +85,14 @@ public class RefreshableBeanDefinitionResolver {
         return new JdbcTemplate(dataSource);
     }
 
-    // 获取 Early RedisClient
-    private static RedisClient resolverEarlyRedisClient(Environment environment) {
+    // 获取 Early RedissonClient
+    private static RedissonClient resolverEarlyRedissonClient(Environment environment) {
         log.debug("Starting to access the early redis.");
-        var host = environment.getProperty("spring.data.redis.host");
-        var port = environment.getProperty("spring.data.redis.port", Integer.class);
-        var password = environment.getProperty("spring.data.redis.password");
-        var builder = RedisURI.builder()
-                .withHost(host)
-                .withPort(port)
-                .withDatabase(0);
-        if (Assert.strNotBlank(password)) builder.withPassword((CharSequence) password);
-        var redisUri = builder.build();
-        return RedisClient.create(redisUri);
+        try {
+            var config = Config.fromYAML(environment.getProperty("spring.redis.redisson.config"));
+            return Redisson.create(config);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 }
